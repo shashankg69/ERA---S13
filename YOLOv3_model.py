@@ -5,7 +5,7 @@ Implementation of YOLOv3 architecture
 import torch
 import torch.nn as nn
 
-import config 
+import config as cfg
 
 """ 
 Information about architecture config:
@@ -52,7 +52,7 @@ class CNNBlock(nn.Module):
         elif atype == 'relu':
             return nn.ReLU()
 
-    def __init__(self, in_channels, out_channels, kernel_size, padding=0, stride=1, act=config.ACTIVATION, bn_act=True,
+    def __init__(self, in_channels, out_channels, kernel_size, padding=0, stride=1, act=cfg.ACTIVATION, bn_act=True,
                  dws=False):
         super(CNNBlock, self).__init__()
 
@@ -109,7 +109,7 @@ class ScalePrediction(nn.Module):
         self.pred = nn.Sequential(
             CNNBlock(in_channels, 2 * in_channels, 3, padding=1),
             CNNBlock(2 * in_channels, (num_classes + 5) * 3, 1, bn_act=False),
-            nn.AdaptiveAvgPool2d(config.S[rep])
+            nn.AdaptiveAvgPool2d(cfg.S[rep])
         )
         self.num_classes = num_classes
         self.rep = rep

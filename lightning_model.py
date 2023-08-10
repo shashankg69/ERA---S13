@@ -14,7 +14,7 @@ from utils import ResizeDataLoader, cells_to_bboxes, non_max_suppression
 
 class Model(LightningModule):
     def __init__(self, in_channels=3, num_classes=config.NUM_CLASSES, batch_size=config.BATCH_SIZE,
-                 learning_rate=config.LEARNING_RATE, enable_gc='batch', num_epochs=config.NUM_EPOCHS,):
+                 learning_rate=config.LEARNING_RATE, enable_gc='batch', num_epochs=config.NUM_EPOCHS):
         super(Model, self).__init__()
         self.network = YOLOv3(in_channels, num_classes)
         self.criterion = YoloLoss()

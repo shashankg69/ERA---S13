@@ -9,7 +9,6 @@ from torchvision.transforms import Resize
 from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from dataset import YOLODataset
 
 
 def seed_everything(seed=42):
@@ -531,52 +530,6 @@ def get_loaders():
     return train_loader, test_loader, train_eval_loader
 
 
-
-def train_dataloader(self):
-    train_dataset = YOLODataset(
-            config.DATASET + '/train.csv',
-            transform=config.train_transforms,
-            img_dir=config.IMG_DIR,
-            label_dir=config.LABEL_DIR,
-            anchors=config.ANCHORS,
-            mosaic=0.75
-        )
-
-    train_loader = ResizeDataLoader(
-            dataset=train_dataset,
-            batch_size=self.batch_size,
-            num_workers=config.NUM_WORKERS,
-            pin_memory=config.PIN_MEMORY,
-            shuffle=True,
-            resolutions=config.MULTIRES,
-            cum_weights=config.CUM_PROBS
-        )
-
-    return train_loader
-    
-
-def val_dataloader(self):
-    
-    train_eval_dataset = YOLODataset(
-            config.DATASET + '/test.csv',
-            transform=config.test_transforms,
-            img_dir=config.IMG_DIR,
-            label_dir=config.LABEL_DIR,
-            anchors=config.ANCHORS,
-            mosaic=0
-        )
-
-    train_eval_loader = DataLoader(
-            dataset=train_eval_dataset,
-            batch_size=self.batch_size,
-            num_workers=config.NUM_WORKERS,
-            pin_memory=config.PIN_MEMORY,
-            shuffle=False
-        )
-
-    return train_eval_loader
-
-
 class ResizeDataLoader(DataLoader):
     def __init__(self, dataset, resolutions=None, cum_weights=None, **kwargs):
         super(ResizeDataLoader, self).__init__(dataset, **kwargs)
@@ -620,16 +573,6 @@ def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
         )
         plot_image(x[i].permute(1,2,0).detach().cpu(), nms_boxes)
 
-
-def get_device():
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif torch.backends.mps.is_available():
-        device = "mps"
-    else:
-        device = "cpu"
-    print("Device Selected:", device)
-    return device
 
 def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)

@@ -7,21 +7,24 @@ import numpy as np
 import os
 import pandas as pd
 import torch
-import random 
+from utils import ResizeDataLoader, show_transform
+import random
 import itertools
+
 from PIL import Image, ImageFile
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
+
 from utils import (
     cells_to_bboxes,
     iou_width_height as iou,
     non_max_suppression as nms,
     plot_image,
-    show_transform,
-    ResizeDataLoader,
-    xywhn2xyxy, xyxy2xywhn
+    xywhn2xyxy,
+    xyxy2xywhn
 )
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 
 class YOLODataset(Dataset):
     def __init__(
@@ -31,11 +34,10 @@ class YOLODataset(Dataset):
         label_dir,
         anchors,
         image_size=config.IMAGE_SIZE,
-        S = [config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
-        C=20,
+        S=config.S,
         transform=None,
-        mosaic = 0.75,
-        targets = True
+        mosaic=0.75,
+        targets=True
     ):
         self.annotations = pd.read_csv(csv_file)
         self.img_dir = img_dir
@@ -52,7 +54,8 @@ class YOLODataset(Dataset):
 
     def __len__(self):
         return len(self.annotations)
-    
+
+
     def load_mosaic(self, index, p=0.5):
         if random.random() >= p:
             return self.load_image(index)

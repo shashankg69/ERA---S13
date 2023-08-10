@@ -5,8 +5,6 @@ import random
 import numpy as np
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from utils import get_device
-
 
 def seed_everything(seed=42):
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -16,10 +14,17 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+def get_device():
+    if torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    print("Device Selected:", device)
+    return device
+
 DATASET = 'PASCAL_VOC'
 DEVICE = get_device()
-ACTIVATION = 'relu'
-seed_everything()  # If you want deterministic behavior
+seed_everything() 
 NUM_WORKERS = min(os.cpu_count(), 4)
 BATCH_SIZE = 32
 IMAGE_SIZE = 416
@@ -47,9 +52,6 @@ ANCHORS = [
     [(0.02, 0.03), (0.04, 0.07), (0.08, 0.06)],
 ]  # Note these have been rescaled to be between [0, 1]
 
-SCALED_ANCHORS = (
-    torch.tensor(ANCHORS) * torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
-)
 
 mean = [0.485, 0.456, 0.406]
 std = [0.229, 0.224, 0.225]
@@ -93,6 +95,10 @@ test_transforms = A.Compose(
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[]),
 )
 
+SCALED_ANCHORS = (
+    torch.tensor(ANCHORS) * torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
+)
+
 CLASSES = [
     "aeroplane",
     "bicycle",
@@ -115,3 +121,5 @@ CLASSES = [
     "train",
     "tvmonitor"
 ]
+
+

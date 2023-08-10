@@ -532,8 +532,8 @@ def get_loaders():
 
 
 
-    def train_dataloader(self):
-        train_dataset = YOLODataset(
+def train_dataloader(self):
+    train_dataset = YOLODataset(
             config.DATASET + '/train.csv',
             transform=config.train_transforms,
             img_dir=config.IMG_DIR,
@@ -542,7 +542,7 @@ def get_loaders():
             mosaic=0.75
         )
 
-        train_loader = ResizeDataLoader(
+    train_loader = ResizeDataLoader(
             dataset=train_dataset,
             batch_size=self.batch_size,
             num_workers=config.NUM_WORKERS,
@@ -552,7 +552,7 @@ def get_loaders():
             cum_weights=config.CUM_PROBS
         )
 
-        return train_loader
+    return train_loader
     
 
 def val_dataloader(self):
@@ -621,6 +621,15 @@ def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
         plot_image(x[i].permute(1,2,0).detach().cpu(), nms_boxes)
 
 
+def get_device():
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    print("Device Selected:", device)
+    return device
 
 def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)

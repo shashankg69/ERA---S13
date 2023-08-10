@@ -43,7 +43,7 @@ config = [
 
 class CNNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, bn_act=True, **kwargs):
-        super().__init__()
+        super(CNNBlock, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, bias=not bn_act, **kwargs)
         self.bn = nn.BatchNorm2d(out_channels)
         self.leaky = nn.LeakyReLU(0.1)
@@ -98,7 +98,7 @@ class ScalePrediction(nn.Module):
 
 class YOLOv3(nn.Module):
     def __init__(self, in_channels=3, num_classes=80):
-        super().__init__()
+        super(YOLOv3, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.layers = self._create_conv_layers()

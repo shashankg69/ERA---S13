@@ -3,16 +3,16 @@ Implementation of Yolo Loss Function similar to the one in Yolov3 paper,
 the difference from what I can tell is I use CrossEntropy for the classes
 instead of BinaryCrossEntropy.
 """
-import random
+
 import torch
 import torch.nn as nn
-
+from pytorch_lightning import LightningModule
 from utils import intersection_over_union
 
 
-class YoloLoss(nn.Module):
+class YoloLossSingle(LightningModule):
     def __init__(self):
-        super().__init__()
+        super(YoloLossSingle, self).__init__()
         self.mse = nn.MSELoss()
         self.bce = nn.BCEWithLogitsLoss()
         self.entropy = nn.CrossEntropyLoss()
@@ -24,7 +24,7 @@ class YoloLoss(nn.Module):
         self.lambda_obj = 1
         self.lambda_box = 10
 
-    def forward(self, predictions, target, anchors):
+    def calculate(self, predictions, target, anchors):
         # Check where obj and noobj (we ignore if target == -1)
         obj = target[..., 0] == 1  # in paper this is Iobj_i
         noobj = target[..., 0] == 0  # in paper this is Inoobj_i
@@ -64,16 +64,24 @@ class YoloLoss(nn.Module):
             (predictions[..., 5:][obj]), (target[..., 5][obj].long()),
         )
 
-        #print("__________________________________")
-        #print(self.lambda_box * box_loss)
-        #print(self.lambda_obj * object_loss)
-        #print(self.lambda_noobj * no_object_loss)
-        #print(self.lambda_class * class_loss)
-        #print("\n")
-
         return (
             self.lambda_box * box_loss
             + self.lambda_obj * object_loss
             + self.lambda_noobj * no_object_loss
             + self.lambda_class * class_loss
         )
+
+    def forward(self, predictions, target, anchors):
+        return self.calculate(predictions, target, anchors)
+
+
+class YoloLoss(LightningModule):
+    def __init__(self):
+        super(YoloLoss, self).__init__()
+        self.yolo_single = YoloLossSingle()
+
+    def forward(self, predictions, target, scaled_anchors):
+        combined_loss = 0
+        for i in range(len(target)):
+            combined_loss += self.yolo_single(predictions[i], target[i], scaled_anchors[i])
+        return combined_loss

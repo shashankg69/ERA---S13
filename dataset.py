@@ -7,16 +7,18 @@ import numpy as np
 import os
 import pandas as pd
 import torch
-from utils import xywhn2xyxy, xyxy2xywhn
 import random 
-
+import itertools
 from PIL import Image, ImageFile
 from torch.utils.data import Dataset, DataLoader
 from utils import (
     cells_to_bboxes,
     iou_width_height as iou,
     non_max_suppression as nms,
-    plot_image
+    plot_image,
+    show_transform,
+    ResizeDataLoader,
+    xywhn2xyxy, xyxy2xywhn
 )
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -28,48 +30,51 @@ class YOLODataset(Dataset):
         img_dir,
         label_dir,
         anchors,
-        image_size=416,
-        S=[13, 26, 52],
+        image_size=config.IMAGE_SIZE,
+        S = [config.IMAGE_SIZE // 32, config.IMAGE_SIZE // 16, config.IMAGE_SIZE // 8],
         C=20,
         transform=None,
+        mosaic = 0.75,
+        targets = True
     ):
         self.annotations = pd.read_csv(csv_file)
         self.img_dir = img_dir
         self.label_dir = label_dir
         self.image_size = image_size
-        self.mosaic_border = [image_size // 2, image_size // 2]
         self.transform = transform
+        self.mosaic = mosaic
+        self.targets = targets
         self.S = S
         self.anchors = torch.tensor(anchors[0] + anchors[1] + anchors[2])  # for all 3 scales
         self.num_anchors = self.anchors.shape[0]
         self.num_anchors_per_scale = self.num_anchors // 3
-        self.C = C
         self.ignore_iou_thresh = 0.5
 
     def __len__(self):
         return len(self.annotations)
     
-    def load_mosaic(self, index):
+    def load_mosaic(self, index, p=0.5):
+        if random.random() >= p:
+            return self.load_image(index)
+
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
         labels4 = []
         s = self.image_size
-        yc, xc = (int(random.uniform(x, 2 * s - x)) for x in self.mosaic_border)  # mosaic center x, y
+        mosaic_border = [s // 2, s // 2]
+        yc, xc = (int(random.uniform(x, 2 * s - x)) for x in mosaic_border)  # mosaic center x, y
         indices = [index] + random.choices(range(len(self)), k=3)  # 3 additional image indices
         random.shuffle(indices)
         for i, index in enumerate(indices):
             # Load image
-            label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
-            bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
-            img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
-            img = np.array(Image.open(img_path).convert("RGB"))
-            
+            img, bboxes = self.load_image(index)
 
             h, w = img.shape[0], img.shape[1]
             labels = np.array(bboxes)
 
             # place img in img4
             if i == 0:  # top left
-                img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                # img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                img4 = np.full((s * 2, s * 2, img.shape[2]), np.array(config.mean) * 255, dtype=np.uint8)
                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
             elif i == 1:  # top right
@@ -100,16 +105,18 @@ class YOLODataset(Dataset):
         labels4[:, :-1] = np.clip(labels4[:, :-1], 0, 1)
         labels4 = labels4[labels4[:, 2] > 0]
         labels4 = labels4[labels4[:, 3] > 0]
-        return img4, labels4 
+        return img4, labels4
 
     def __getitem__(self, index):
-
-        image, bboxes = self.load_mosaic(index)
+        image, bboxes = self.load_mosaic(index, p=self.mosaic)
 
         if self.transform:
             augmentations = self.transform(image=image, bboxes=bboxes)
             image = augmentations["image"]
             bboxes = augmentations["bboxes"]
+
+        if not self.targets:
+            return image, bboxes
 
         # Below assumes 3 scale predictions (as paper) and same num of anchors per scale
         targets = [torch.zeros((self.num_anchors // 3, S, S, 6)) for S in self.S]
@@ -142,39 +149,45 @@ class YOLODataset(Dataset):
                     targets[scale_idx][anchor_on_scale, i, j, 0] = -1  # ignore prediction
 
         return image, tuple(targets)
+    
+    def load_image(self, index):
+        label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
+        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
+        img = np.array(Image.open(img_path).convert("RGB"))
+
+        return img, bboxes
 
 
 def test():
     anchors = config.ANCHORS
 
-    transform = config.test_transforms
+    transform = config.train_transforms
 
     dataset = YOLODataset(
-        "COCO/train.csv",
-        "COCO/images/images/",
-        "COCO/labels/labels_new/",
-        S=[13, 26, 52],
+        config.DATASET + '/train.csv',
+        img_dir=config.IMG_DIR,
+        label_dir=config.LABEL_DIR,
         anchors=anchors,
-        transform=transform,
+        transform=transform
     )
-    S = [13, 26, 52]
-    scaled_anchors = torch.tensor(anchors) / (
-        1 / torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
-    )
-    loader = DataLoader(dataset=dataset, batch_size=1, shuffle=True)
-    for x, y in loader:
-        boxes = []
 
-        for i in range(y[0].shape[1]):
+    scaled_anchors = config.SCALED_ANCHORS
+    loader = ResizeDataLoader(dataset=dataset, batch_size=32, shuffle=True, resolutions=config.MULTIRES,
+                              cum_weights=config.CUM_PROBS)
+    for x, y in itertools.islice(loader, 1):
+        batch_size = x.shape[0]
+        boxes = [list() for _ in range(batch_size)]
+        for i in range(3):
             anchor = scaled_anchors[i]
-            print(anchor.shape)
-            print(y[i].shape)
-            boxes += cells_to_bboxes(
+            i_boxes = cells_to_bboxes(
                 y[i], is_preds=False, S=y[i].shape[2], anchors=anchor
-            )[0]
-        boxes = nms(boxes, iou_threshold=1, threshold=0.7, box_format="midpoint")
-        print(boxes)
-        plot_image(x[0].permute(1, 2, 0).to("cpu"), boxes)
+            )
+            for j in range(batch_size):
+                boxes[j] += i_boxes[j]
+        for i in range(batch_size):
+            nms_boxes = nms(boxes[i], iou_threshold=1, threshold=0.7, box_format="midpoint")
+            plot_image(show_transform(x[i]).to("cpu"), nms_boxes)
 
 
 if __name__ == "__main__":

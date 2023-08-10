@@ -1,20 +1,24 @@
 import albumentations as A
 import cv2
 import torch
+import os
 
 from albumentations.pytorch import ToTensorV2
-from utils import seed_everything
+from utils import seed_everything, get_device
 
 DATASET = 'PASCAL_VOC'
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# seed_everything()  # If you want deterministic behavior
-NUM_WORKERS = 0
+DEVICE = get_device()
+seed_everything()  
+NUM_WORKERS = min(os.cpu_count(), 4)
 BATCH_SIZE = 32
 IMAGE_SIZE = 416
+MULTIRES = [416]
+CUM_PROBS = [100]
+MAX_IMAGE_SIZE = MULTIRES[-1]
 NUM_CLASSES = 20
-LEARNING_RATE = 1e-5
+LEARNING_RATE = 3e-4
 WEIGHT_DECAY = 1e-4
-NUM_EPOCHS = 100
+NUM_EPOCHS = 40
 CONF_THRESHOLD = 0.05
 MAP_IOU_THRESH = 0.5
 NMS_IOU_THRESH = 0.45
@@ -32,51 +36,48 @@ ANCHORS = [
     [(0.02, 0.03), (0.04, 0.07), (0.08, 0.06)],
 ]  # Note these have been rescaled to be between [0, 1]
 
-means = [0.485, 0.456, 0.406]
+mean = [0.485, 0.456, 0.406]
+std = [0.229, 0.224, 0.225]
+
 
 scale = 1.1
 train_transforms = A.Compose(
     [
-        A.LongestMaxSize(max_size=int(IMAGE_SIZE * scale)),
+        A.Posterize(p=0.1),
+        A.CLAHE(p=0.1),
+        A.Normalize(mean=mean, std=std),
+        A.LongestMaxSize(max_size=int(MAX_IMAGE_SIZE * scale)),
         A.PadIfNeeded(
-            min_height=int(IMAGE_SIZE * scale),
-            min_width=int(IMAGE_SIZE * scale),
+            min_height=int(MAX_IMAGE_SIZE * scale),
+            min_width=int(MAX_IMAGE_SIZE * scale),
             border_mode=cv2.BORDER_CONSTANT,
+            value=0
         ),
-        A.Rotate(limit = 10, interpolation=1, border_mode=4),
-        A.RandomCrop(width=IMAGE_SIZE, height=IMAGE_SIZE),
+        # A.Rotate(limit=10),
+        A.RandomCrop(width=MAX_IMAGE_SIZE, height=MAX_IMAGE_SIZE),
         A.ColorJitter(brightness=0.6, contrast=0.6, saturation=0.6, hue=0.6, p=0.4),
-        A.OneOf(
-            [
-                A.ShiftScaleRotate(
-                    rotate_limit=20, p=0.5, border_mode=cv2.BORDER_CONSTANT
-                ),
-                # A.Affine(shear=15, p=0.5, mode="constant"),
-            ],
-            p=1.0,
-        ),
+        A.ShiftScaleRotate(rotate_limit=20, p=1.0, border_mode=cv2.BORDER_CONSTANT, value=0),
         A.HorizontalFlip(p=0.5),
         A.Blur(p=0.1),
-        A.CLAHE(p=0.1),
-        A.Posterize(p=0.1),
         A.ToGray(p=0.1),
         A.ChannelShuffle(p=0.05),
-        A.Normalize(mean=[0, 0, 0], std=[1, 1, 1], max_pixel_value=255,),
-        ToTensorV2(),
+        ToTensorV2()
     ],
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[],),
 )
+
 test_transforms = A.Compose(
     [
+        A.Normalize(mean=mean, std=std),
         A.LongestMaxSize(max_size=IMAGE_SIZE),
         A.PadIfNeeded(
-            min_height=IMAGE_SIZE, min_width=IMAGE_SIZE, border_mode=cv2.BORDER_CONSTANT
+            min_height=IMAGE_SIZE, min_width=IMAGE_SIZE, border_mode=cv2.BORDER_CONSTANT, value=0
         ),
-        A.Normalize(mean=[0, 0, 0], std=[1, 1, 1], max_pixel_value=255,),
-        ToTensorV2(),
+        ToTensorV2()
     ],
     bbox_params=A.BboxParams(format="yolo", min_visibility=0.4, label_fields=[]),
 )
+
 
 PASCAL_CLASSES = [
     "aeroplane",
@@ -101,84 +102,6 @@ PASCAL_CLASSES = [
     "tvmonitor"
 ]
 
-COCO_LABELS = ['person',
- 'bicycle',
- 'car',
- 'motorcycle',
- 'airplane',
- 'bus',
- 'train',
- 'truck',
- 'boat',
- 'traffic light',
- 'fire hydrant',
- 'stop sign',
- 'parking meter',
- 'bench',
- 'bird',
- 'cat',
- 'dog',
- 'horse',
- 'sheep',
- 'cow',
- 'elephant',
- 'bear',
- 'zebra',
- 'giraffe',
- 'backpack',
- 'umbrella',
- 'handbag',
- 'tie',
- 'suitcase',
- 'frisbee',
- 'skis',
- 'snowboard',
- 'sports ball',
- 'kite',
- 'baseball bat',
- 'baseball glove',
- 'skateboard',
- 'surfboard',
- 'tennis racket',
- 'bottle',
- 'wine glass',
- 'cup',
- 'fork',
- 'knife',
- 'spoon',
- 'bowl',
- 'banana',
- 'apple',
- 'sandwich',
- 'orange',
- 'broccoli',
- 'carrot',
- 'hot dog',
- 'pizza',
- 'donut',
- 'cake',
- 'chair',
- 'couch',
- 'potted plant',
- 'bed',
- 'dining table',
- 'toilet',
- 'tv',
- 'laptop',
- 'mouse',
- 'remote',
- 'keyboard',
- 'cell phone',
- 'microwave',
- 'oven',
- 'toaster',
- 'sink',
- 'refrigerator',
- 'book',
- 'clock',
- 'vase',
- 'scissors',
- 'teddy bear',
- 'hair drier',
- 'toothbrush'
-]
+SCALED_ANCHORS = (
+    torch.tensor(ANCHORS) * torch.tensor(S).unsqueeze(1).unsqueeze(1).repeat(1, 3, 2)
+)

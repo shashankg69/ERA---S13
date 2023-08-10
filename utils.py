@@ -5,10 +5,20 @@ import numpy as np
 import os
 import random
 import torch
-
+from torchvision.transforms import Resize
 from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from dataset import YOLODataset
+
+
+def seed_everything(seed=42):
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def iou_width_height(boxes1, boxes2):
@@ -232,6 +242,20 @@ def mean_average_precision(
     return sum(average_precisions) / len(average_precisions)
 
 
+def denormalise(tensor):
+    result = tensor.clone().detach().requires_grad_(False)
+    for t, m, s in zip(result, config.mean, config.std):
+        t.mul_(s).add_(m)
+    return result
+
+def show_transform(img):
+    img = denormalise(img)
+    if len(config.mean) == 3:
+        return img.permute(1,2,0)
+    else:
+        return img.squeeze(0)
+
+
 def plot_image(image, boxes):
     """Plots predicted bounding boxes on the image"""
     cmap = plt.get_cmap("tab20b")
@@ -373,6 +397,7 @@ def cells_to_bboxes(predictions, anchors, S, is_preds=True):
     converted_bboxes = torch.cat((best_class, scores, x, y, w_h), dim=-1).reshape(BATCH_SIZE, num_anchors * S * S, 6)
     return converted_bboxes.tolist()
 
+
 def check_class_accuracy(model, loader, threshold):
     model.eval()
     tot_class_preds, correct_class = 0, 0
@@ -386,7 +411,7 @@ def check_class_accuracy(model, loader, threshold):
 
         for i in range(3):
             y[i] = y[i].to(config.DEVICE)
-            obj = y[i][..., 0] == 1 # in paper this is Iobj_i
+            obj = y[i][..., 0] == 1  # in paper this is Iobj_i
             noobj = y[i][..., 0] == 0  # in paper this is Iobj_i
 
             correct_class += torch.sum(
@@ -400,9 +425,9 @@ def check_class_accuracy(model, loader, threshold):
             correct_noobj += torch.sum(obj_preds[noobj] == y[i][..., 0][noobj])
             tot_noobj += torch.sum(noobj)
 
-    print(f"Class accuracy is: {(correct_class/(tot_class_preds+1e-16))*100:2f}%")
-    print(f"No obj accuracy is: {(correct_noobj/(tot_noobj+1e-16))*100:2f}%")
-    print(f"Obj accuracy is: {(correct_obj/(tot_obj+1e-16))*100:2f}%")
+    print(f"Class accuracy is: {(correct_class / (tot_class_preds + 1e-16)) * 100:2f}%")
+    print(f"No obj accuracy is: {(correct_noobj / (tot_noobj + 1e-16)) * 100:2f}%")
+    print(f"Obj accuracy is: {(correct_obj / (tot_obj + 1e-16)) * 100:2f}%")
     model.train()
 
 
@@ -442,61 +467,134 @@ def load_checkpoint(checkpoint_file, model, optimizer, lr):
         param_group["lr"] = lr
 
 
-def get_loaders(train_csv_path, test_csv_path):
+def get_loaders():
     from dataset import YOLODataset
 
     IMAGE_SIZE = config.IMAGE_SIZE
+
     train_dataset = YOLODataset(
-        train_csv_path,
+        config.DATASET + '/train.csv',
         transform=config.train_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        mosaic=0.75
     )
+
     test_dataset = YOLODataset(
-        test_csv_path,
+        config.DATASET + '/test.csv',
         transform=config.test_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        mosaic=0
     )
-    train_loader = DataLoader(
+
+    train_loader = ResizeDataLoader(
         dataset=train_dataset,
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=config.PIN_MEMORY,
         shuffle=True,
-        drop_last=False,
+        resolutions=config.MULTIRES,
+        cum_weights=config.CUM_PROBS
     )
+
     test_loader = DataLoader(
         dataset=test_dataset,
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=config.PIN_MEMORY,
         shuffle=False,
-        drop_last=False,
     )
 
     train_eval_dataset = YOLODataset(
-        train_csv_path,
+        config.DATASET + '/train.csv',
         transform=config.test_transforms,
         S=[IMAGE_SIZE // 32, IMAGE_SIZE // 16, IMAGE_SIZE // 8],
         img_dir=config.IMG_DIR,
         label_dir=config.LABEL_DIR,
         anchors=config.ANCHORS,
+        mosaic=0
     )
+
     train_eval_loader = DataLoader(
         dataset=train_eval_dataset,
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
         pin_memory=config.PIN_MEMORY,
-        shuffle=False,
-        drop_last=False,
+        shuffle=False
     )
 
     return train_loader, test_loader, train_eval_loader
+
+
+
+    def train_dataloader(self):
+        train_dataset = YOLODataset(
+            config.DATASET + '/train.csv',
+            transform=config.train_transforms,
+            img_dir=config.IMG_DIR,
+            label_dir=config.LABEL_DIR,
+            anchors=config.ANCHORS,
+            mosaic=0.75
+        )
+
+        train_loader = ResizeDataLoader(
+            dataset=train_dataset,
+            batch_size=self.batch_size,
+            num_workers=config.NUM_WORKERS,
+            pin_memory=config.PIN_MEMORY,
+            shuffle=True,
+            resolutions=config.MULTIRES,
+            cum_weights=config.CUM_PROBS
+        )
+
+        return train_loader
+    
+
+def val_dataloader(self):
+    
+    train_eval_dataset = YOLODataset(
+            config.DATASET + '/test.csv',
+            transform=config.test_transforms,
+            img_dir=config.IMG_DIR,
+            label_dir=config.LABEL_DIR,
+            anchors=config.ANCHORS,
+            mosaic=0
+        )
+
+    train_eval_loader = DataLoader(
+            dataset=train_eval_dataset,
+            batch_size=self.batch_size,
+            num_workers=config.NUM_WORKERS,
+            pin_memory=config.PIN_MEMORY,
+            shuffle=False
+        )
+
+    return train_eval_loader
+
+
+class ResizeDataLoader(DataLoader):
+    def __init__(self, dataset, resolutions=None, cum_weights=None, **kwargs):
+        super(ResizeDataLoader, self).__init__(dataset, **kwargs)
+        self.resolutions = resolutions
+        self.cum_weights = cum_weights
+        self.resizers = None
+        if (self.resolutions is not None and self.cum_weights is not None and len(resolutions) > 1
+                and len(self.resolutions) == len(self.cum_weights)):
+            self.resizers = [Resize(res, antialias=True) for res in self.resolutions]
+
+    def __iter__(self):
+        gen = super(ResizeDataLoader, self).__iter__()
+        for x, y in gen:
+            if self.resizers is not None and len(self.resizers) > 1:
+                resizer = random.choices(self.resizers, cum_weights=self.cum_weights, k=1)[0]
+                if resizer.size != x.shape[2]:
+                    x = resizer(x)
+            yield x, y
 
 def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
     model.eval()
@@ -524,23 +622,13 @@ def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
 
 
 
-def seed_everything(seed=42):
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
 def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     boxes[:, 0].clamp_(0, img_shape[1])  # x1
     boxes[:, 1].clamp_(0, img_shape[0])  # y1
     boxes[:, 2].clamp_(0, img_shape[1])  # x2
     boxes[:, 3].clamp_(0, img_shape[0])  # y2
+
 
 def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
     # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
@@ -559,6 +647,7 @@ def xyn2xy(x, w=640, h=640, padw=0, padh=0):
     y[..., 1] = h * x[..., 1] + padh  # top left y
     return y
 
+
 def xyxy2xywhn(x, w=640, h=640, clip=False, eps=0.0):
     # Convert nx4 boxes from [x1, y1, x2, y2] to [x, y, w, h] normalized where xy1=top-left, xy2=bottom-right
     if clip:
@@ -570,6 +659,7 @@ def xyxy2xywhn(x, w=640, h=640, clip=False, eps=0.0):
     y[..., 3] = (x[..., 3] - x[..., 1]) / h  # height
     return y
 
+
 def clip_boxes(boxes, shape):
     # Clip boxes (xyxy) to image shape (height, width)
     if isinstance(boxes, torch.Tensor):  # faster individually
@@ -580,3 +670,12 @@ def clip_boxes(boxes, shape):
     else:  # np.array (faster grouped)
         boxes[..., [0, 2]] = boxes[..., [0, 2]].clip(0, shape[1])  # x1, x2
         boxes[..., [1, 3]] = boxes[..., [1, 3]].clip(0, shape[0])  # y1, y2
+
+
+def find_lr(model, data_loader, optimizer, criterion, device=config.DEVICE):
+    from torch_lr_finder import LRFinder
+    lr_finder = LRFinder(model, optimizer, criterion, device=device)
+    lr_finder.range_test(data_loader, end_lr=0.1, num_iter=100, step_mode='exp')
+    _, best_lr = lr_finder.plot()
+    lr_finder.reset()
+    return best_lr

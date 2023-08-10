@@ -27,39 +27,37 @@ class Model(LightningModule):
         return self.network(x)
 
 
-    def training_step(self, batch, batch_idx):
-        x, y = batch
-        out = self.forward(x)
-        loss = self.criterion(out, y, self.scaled_anchors)
-        self.log(f"Train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        del out, x, y
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        out = self.forward(x)
-        loss = self.criterion(out, y, self.scaled_anchors)
-        self.log(f"Validation_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        del out, x, y
-        return loss
-    
-
-    # def common_step(self, batch):
+    # def training_step(self, batch, batch_idx):
     #     x, y = batch
     #     out = self.forward(x)
     #     loss = self.criterion(out, y, self.scaled_anchors)
-    #     del out, x, y
-    #     return loss
-
-    # def training_step(self, batch, batch_idx):
-    #     loss = self.common_step(batch)
-    #     self.log(f"train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #     self.log(f"Train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
     #     return loss
 
     # def validation_step(self, batch, batch_idx):
-    #     loss = self.common_step(batch)
-    #     self.log(f"val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #     x, y = batch
+    #     out = self.forward(x)
+    #     loss = self.criterion(out, y, self.scaled_anchors)
+    #     self.log(f"Validation_loss", loss, on_epoch=True, prog_bar=True, logger=True)
     #     return loss
+    
+
+    def common_step(self, batch):
+        x, y = batch
+        out = self.forward(x)
+        loss = self.criterion(out, y, self.scaled_anchors)
+        del out, x, y
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        loss = self.common_step(batch)
+        self.log(f"train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self.common_step(batch)
+        self.log(f"val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        return loss
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         if isinstance(batch, (tuple, list)):

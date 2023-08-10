@@ -5,7 +5,7 @@ from dataset import YOLODataset
 from loss import YoloLoss
 from torch import optim
 from torch.utils.data import DataLoader
-from utils import get_loaders
+from utils import cells_to_bboxes, get_loaders, non_max_suppression
 
 import config
 from utils import ResizeDataLoader
@@ -58,6 +58,7 @@ class Model(LightningModule):
         loss = self.common_step(batch)
         self.log(f"val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
         return loss
+    
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         if isinstance(batch, (tuple, list)):
@@ -135,6 +136,39 @@ class Model(LightningModule):
         return self.val_dataloader()
 
 
+    def on_epoch_end(self):
+        self.model.eval()
+        loader = self.train_dataloader()
+        thresh = 0.6
+        iou_thresh = 0.5
+
+        x, y = next(iter(loader))
+        x = x.to(self.device)
+
+        with torch.no_grad():
+            out = self.model(x)
+            bboxes = [[] for _ in range(x.shape[0])]
+            for i in range(3):
+                batch_size, A, S, _, _ = out[i].shape
+                anchor = self.anchors[i]
+                boxes_scale_i = cells_to_bboxes(
+                    out[i], anchor, S=S, is_preds=True
+                )
+                for idx, (box) in enumerate(boxes_scale_i):
+                    bboxes[idx] += box
+
+        self.model.train()
+
+        for i in range(batch_size // 4):
+            nms_boxes = non_max_suppression(
+                bboxes[i],
+                iou_threshold=iou_thresh,
+                threshold=thresh,
+                box_format="midpoint",
+            )
+            self.plot_image(x[i].permute(1, 2, 0).detach().cpu(), nms_boxes)
+
+            
 def main():
     num_classes = 20
     IMAGE_SIZE = 416

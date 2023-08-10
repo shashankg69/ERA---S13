@@ -5,7 +5,7 @@ from dataset import YOLODataset
 from loss import YoloLoss
 from torch import optim
 from torch.utils.data import DataLoader
-from utils import get_loaders, train_dataloader, val_dataloader
+from utils import get_loaders
 
 import config
 from utils import ResizeDataLoader
@@ -90,48 +90,48 @@ class Model(LightningModule):
             }
         }
 
-    # def train_dataloader(self):
-    #     train_dataset = YOLODataset(
-    #         config.DATASET + '/train.csv',
-    #         transform=config.train_transforms,
-    #         img_dir=config.IMG_DIR,
-    #         label_dir=config.LABEL_DIR,
-    #         anchors=config.ANCHORS,
-    #         mosaic=0.75
-    #     )
+    def train_dataloader(self):
+        train_dataset = YOLODataset(
+            config.DATASET + '/train.csv',
+            transform=config.train_transforms,
+            img_dir=config.IMG_DIR,
+            label_dir=config.LABEL_DIR,
+            anchors=config.ANCHORS,
+            mosaic=0.75
+        )
 
-    #     train_loader = ResizeDataLoader(
-    #         dataset=train_dataset,
-    #         batch_size=self.batch_size,
-    #         num_workers=config.NUM_WORKERS,
-    #         pin_memory=config.PIN_MEMORY,
-    #         shuffle=True,
-    #         resolutions=config.MULTIRES,
-    #         cum_weights=config.CUM_PROBS
-    #     )
+        train_loader = ResizeDataLoader(
+            dataset=train_dataset,
+            batch_size=self.batch_size,
+            num_workers=config.NUM_WORKERS,
+            pin_memory=config.PIN_MEMORY,
+            shuffle=True,
+            resolutions=config.MULTIRES,
+            cum_weights=config.CUM_PROBS
+        )
 
-    #     return train_loader
+        return train_loader
     
 
-    # def val_dataloader(self):
-    #     train_eval_dataset = YOLODataset(
-    #         config.DATASET + '/test.csv',
-    #         transform=config.test_transforms,
-    #         img_dir=config.IMG_DIR,
-    #         label_dir=config.LABEL_DIR,
-    #         anchors=config.ANCHORS,
-    #         mosaic=0
-    #     )
+    def val_dataloader(self):
+        train_eval_dataset = YOLODataset(
+            config.DATASET + '/test.csv',
+            transform=config.test_transforms,
+            img_dir=config.IMG_DIR,
+            label_dir=config.LABEL_DIR,
+            anchors=config.ANCHORS,
+            mosaic=0
+        )
 
-    #     train_eval_loader = DataLoader(
-    #         dataset=train_eval_dataset,
-    #         batch_size=self.batch_size,
-    #         num_workers=config.NUM_WORKERS,
-    #         pin_memory=config.PIN_MEMORY,
-    #         shuffle=False
-    #     )
+        train_eval_loader = DataLoader(
+            dataset=train_eval_dataset,
+            batch_size=self.batch_size,
+            num_workers=config.NUM_WORKERS,
+            pin_memory=config.PIN_MEMORY,
+            shuffle=False
+        )
 
-    #     return train_eval_loader
+        return train_eval_loader
 
     def predict_dataloader(self):
         return self.val_dataloader()

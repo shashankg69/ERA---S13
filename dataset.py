@@ -55,6 +55,13 @@ class YOLODataset(Dataset):
     def __len__(self):
         return len(self.annotations)
 
+    def load_image(self, index):
+        label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
+        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
+        img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
+        img = np.array(Image.open(img_path).convert("RGB"))
+
+        return img, bboxes
 
     def load_mosaic(self, index, p=0.5):
         if random.random() >= p:
@@ -152,14 +159,6 @@ class YOLODataset(Dataset):
                     targets[scale_idx][anchor_on_scale, i, j, 0] = -1  # ignore prediction
 
         return image, tuple(targets)
-    
-    def load_image(self, index):
-        label_path = os.path.join(self.label_dir, self.annotations.iloc[index, 1])
-        bboxes = np.roll(np.loadtxt(fname=label_path, delimiter=" ", ndmin=2), 4, axis=1).tolist()
-        img_path = os.path.join(self.img_dir, self.annotations.iloc[index, 0])
-        img = np.array(Image.open(img_path).convert("RGB"))
-
-        return img, bboxes
 
 
 def test():

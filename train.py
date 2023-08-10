@@ -21,6 +21,9 @@ from loss import YoloLoss
 import warnings
 warnings.filterwarnings("ignore")
 
+# torch.backends.cudnn.benchmark = True
+
+
 def train_fn(train_loader, model, optimizer, loss_fn, scaler):
     loop = tqdm(train_loader, leave=True)
     losses = []

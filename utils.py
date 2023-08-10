@@ -2,22 +2,12 @@ import config
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-import os
-import random
 import torch
+import random
 from torchvision.transforms import Resize
 from collections import Counter
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-
-def seed_everything(seed=42):
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 
 def iou_width_height(boxes1, boxes2):
@@ -32,7 +22,7 @@ def iou_width_height(boxes1, boxes2):
         boxes1[..., 1], boxes2[..., 1]
     )
     union = (
-        boxes1[..., 0] * boxes1[..., 1] + boxes2[..., 0] * boxes2[..., 1] - intersection
+            boxes1[..., 0] * boxes1[..., 1] + boxes2[..., 0] * boxes2[..., 1] - intersection
     )
     return intersection / union
 
@@ -117,12 +107,12 @@ def non_max_suppression(bboxes, iou_threshold, threshold, box_format="corners"):
             box
             for box in bboxes
             if box[0] != chosen_box[0]
-            or intersection_over_union(
+               or intersection_over_union(
                 torch.tensor(chosen_box[2:]),
                 torch.tensor(box[2:]),
                 box_format=box_format,
             )
-            < iou_threshold
+               < iou_threshold
         ]
 
         bboxes_after_nms.append(chosen_box)
@@ -131,7 +121,7 @@ def non_max_suppression(bboxes, iou_threshold, threshold, box_format="corners"):
 
 
 def mean_average_precision(
-    pred_boxes, true_boxes, iou_threshold=0.5, box_format="midpoint", num_classes=20
+        pred_boxes, true_boxes, iou_threshold=0.5, box_format="midpoint", num_classes=20
 ):
     """
     Video explanation of this function:
@@ -247,10 +237,11 @@ def denormalise(tensor):
         t.mul_(s).add_(m)
     return result
 
+
 def show_transform(img):
     img = denormalise(img)
     if len(config.mean) == 3:
-        return img.permute(1,2,0)
+        return img.permute(1, 2, 0)
     else:
         return img.squeeze(0)
 
@@ -258,7 +249,7 @@ def show_transform(img):
 def plot_image(image, boxes):
     """Plots predicted bounding boxes on the image"""
     cmap = plt.get_cmap("tab20b")
-    class_labels = config.COCO_LABELS if config.DATASET=='COCO' else config.PASCAL_CLASSES
+    class_labels = config.CLASSES
     colors = [cmap(i) for i in np.linspace(0, 1, len(class_labels))]
     im = np.array(image)
     height, width, _ = im.shape
@@ -301,13 +292,13 @@ def plot_image(image, boxes):
 
 
 def get_evaluation_bboxes(
-    loader,
-    model,
-    iou_threshold,
-    anchors,
-    threshold,
-    box_format="midpoint",
-    device="cuda",
+        loader,
+        model,
+        iou_threshold,
+        anchors,
+        threshold,
+        box_format="midpoint",
+        device="cuda",
 ):
     # make sure model is in eval before get bboxes
     model.eval()
@@ -466,6 +457,26 @@ def load_checkpoint(checkpoint_file, model, optimizer, lr):
         param_group["lr"] = lr
 
 
+class ResizeDataLoader(DataLoader):
+    def __init__(self, dataset, resolutions=None, cum_weights=None, **kwargs):
+        super(ResizeDataLoader, self).__init__(dataset, **kwargs)
+        self.resolutions = resolutions
+        self.cum_weights = cum_weights
+        self.resizers = None
+        if (self.resolutions is not None and self.cum_weights is not None and len(resolutions) > 1
+                and len(self.resolutions) == len(self.cum_weights)):
+            self.resizers = [Resize(res, antialias=True) for res in self.resolutions]
+
+    def __iter__(self):
+        gen = super(ResizeDataLoader, self).__iter__()
+        for x, y in gen:
+            if self.resizers is not None and len(self.resizers) > 1:
+                resizer = random.choices(self.resizers, cum_weights=self.cum_weights, k=1)[0]
+                if resizer.size != x.shape[2]:
+                    x = resizer(x)
+            yield x, y
+
+
 def get_loaders():
     from dataset import YOLODataset
 
@@ -530,25 +541,6 @@ def get_loaders():
     return train_loader, test_loader, train_eval_loader
 
 
-class ResizeDataLoader(DataLoader):
-    def __init__(self, dataset, resolutions=None, cum_weights=None, **kwargs):
-        super(ResizeDataLoader, self).__init__(dataset, **kwargs)
-        self.resolutions = resolutions
-        self.cum_weights = cum_weights
-        self.resizers = None
-        if (self.resolutions is not None and self.cum_weights is not None and len(resolutions) > 1
-                and len(self.resolutions) == len(self.cum_weights)):
-            self.resizers = [Resize(res, antialias=True) for res in self.resolutions]
-
-    def __iter__(self):
-        gen = super(ResizeDataLoader, self).__iter__()
-        for x, y in gen:
-            if self.resizers is not None and len(self.resizers) > 1:
-                resizer = random.choices(self.resizers, cum_weights=self.cum_weights, k=1)[0]
-                if resizer.size != x.shape[2]:
-                    x = resizer(x)
-            yield x, y
-
 def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
     model.eval()
     x, y = next(iter(loader))
@@ -567,11 +559,11 @@ def plot_couple_examples(model, loader, thresh, iou_thresh, anchors):
 
         model.train()
 
-    for i in range(batch_size//4):
+    for i in range(batch_size // 4):
         nms_boxes = non_max_suppression(
             bboxes[i], iou_threshold=iou_thresh, threshold=thresh, box_format="midpoint",
         )
-        plot_image(x[i].permute(1,2,0).detach().cpu(), nms_boxes)
+        plot_image(x[i].permute(1, 2, 0).detach().cpu(), nms_boxes)
 
 
 def clip_coords(boxes, img_shape):

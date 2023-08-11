@@ -33,7 +33,7 @@ DEVICE = get_device()
 ACTIVATION = 'relu'
 seed_everything()  # If you want deterministic behavior
 NUM_WORKERS = min(os.cpu_count(), 4)
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 IMAGE_SIZE = 416
 MULTIRES = [416]
 CUM_PROBS = [100]

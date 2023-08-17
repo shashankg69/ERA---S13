@@ -46,9 +46,17 @@ class Model(LightningModule):
 
     def common_step(self, batch):
         x, y = batch
-        out = self.forward(x)
-        loss = self.criterion(out, y, self.scaled_anchors)
-        del out, x, y
+        y0, y1, y2 = (
+            y[0],
+            y[1],
+            y[2],
+        )
+        out = self(x)
+        loss = (
+                self.loss_fn(out[0], y0, self.scaled_anchors[0])
+                + self.loss_fn(out[1], y1, self.scaled_anchors[1])
+                + self.loss_fn(out[2], y2, self.scaled_anchors[2])
+        )
         return loss
 
     def training_step(self, batch, batch_idx):

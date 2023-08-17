@@ -9,8 +9,20 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 import config
-from utils import ResizeDataLoader, cells_to_bboxes, non_max_suppression
-
+from utils import(
+    mean_average_precision,
+    cells_to_bboxes,
+    get_evaluation_bboxes,
+    save_checkpoint,
+    load_checkpoint,
+    check_class_accuracy,
+    get_loaders,
+    plot_couple_examples,
+    ResizeDataLoader,
+    non_max_suppression
+)
+import warnings
+warnings.filterwarnings("ignore")
 
 class Model(LightningModule):
     def __init__(self, in_channels=3, num_classes=config.NUM_CLASSES, batch_size=config.BATCH_SIZE,
@@ -22,10 +34,12 @@ class Model(LightningModule):
         self.learning_rate = learning_rate
         self.enable_gc = enable_gc
         self.num_epochs = num_epochs
+        self.train_step_output = []
+        self.test_step_outputs = []
 
 
-        # self.scaled_anchors = config.SCALED_ANCHORS
-        self.register_buffer("scaled_anchors", config.SCALED_ANCHORS)
+        self.scaled_anchors = config.SCALED_ANCHORS
+        # self.register_buffer("scaled_anchors", config.SCALED_ANCHORS)
 
     def forward(self, x):
         return self.network(x)
@@ -40,19 +54,39 @@ class Model(LightningModule):
     def training_step(self, batch, batch_idx):
         loss = self.common_step(batch)
         self.log(f"Training_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.train_step_output.append(loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.common_step(batch)
         self.log(f"Validation_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.test_step_outputs.append(loss)
         return loss
+    
+    def on_train_epoch_end(self):
+        print("----------------------------------")
+        print(f"\n Epoch : {self.current_epoch}")
+        print("----------------------------------")
+        train_epoch_avg = torch.stack(self.train_step_output).mean()
+        self.train_step_output.clear()
+        print(f"Training_Loss {train_epoch_avg}")
+        class_accuracy, no_obj_accuracy, obj_accuracy = check_class_accuracy(self.model, self.train_loader, threshold=config.CONF_THRESHOLD)
+        self.log("train/class_accuracy", class_accuracy, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train/no_obj_accuracy", no_obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train/obj_accuracy", obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        if isinstance(batch, (tuple, list)):
-            x, _ = batch
-        else:
-            x = batch
-        return self.forward(x)
+        val_epoch_average = torch.stack(self.validation_step_outputs).mean()
+        self.validation_step_outputs.clear()
+        print(f"Validation loss {val_epoch_average}")
+        print("On Validation loader:")
+        class_accuracy, no_obj_accuracy, obj_accuracy = check_class_accuracy(self.model, self.train_eval_loader, threshold=config.CONF_THRESHOLD)
+        self.log("val/class_accuracy", class_accuracy, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val/no_obj_accuracy", no_obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val/obj_accuracy", obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
+
+        if (self.current_epoch>0) and ((self.current_epoch+1) % 10 == 0):
+            plot_couple_examples(self.model, self.test_loader, 0.6, 0.5, self.scaled_anchors)
+        
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate/100, weight_decay=config.WEIGHT_DECAY)
@@ -158,6 +192,14 @@ class Model(LightningModule):
     #     self.model.train()
     #     return metrics
 
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        if isinstance(batch, (tuple, list)):
+            x, _ = batch
+        else:
+            x = batch
+        return self.forward(x)
+    
     def predict_dataloader(self):
         return self.val_dataloader()
 

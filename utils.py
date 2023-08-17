@@ -418,6 +418,7 @@ def check_class_accuracy(model, loader, threshold):
     print(f"Class accuracy is: {(correct_class / (tot_class_preds + 1e-16)) * 100:2f}%")
     print(f"No obj accuracy is: {(correct_noobj / (tot_noobj + 1e-16)) * 100:2f}%")
     print(f"Obj accuracy is: {(correct_obj / (tot_obj + 1e-16)) * 100:2f}%")
+    print("-------------------------------------------------------------------")
     model.train()
 
 

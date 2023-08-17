@@ -53,9 +53,9 @@ class Model(LightningModule):
         )
         out = self(x)
         loss = (
-                self.loss_fn(out[0], y0, self.scaled_anchors[0])
-                + self.loss_fn(out[1], y1, self.scaled_anchors[1])
-                + self.loss_fn(out[2], y2, self.scaled_anchors[2])
+                self.criterion(out[0], y0, self.scaled_anchors[0])
+                + self.criterion(out[1], y1, self.scaled_anchors[1])
+                + self.criterion(out[2], y2, self.scaled_anchors[2])
         )
         return loss
 

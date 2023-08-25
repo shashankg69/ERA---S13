@@ -4,7 +4,6 @@ Implementation of YOLOv3 architecture
 
 import torch
 import torch.nn as nn
-
 import config as cfg
 
 """ 

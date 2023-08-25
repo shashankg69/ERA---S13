@@ -1,7 +1,6 @@
 import torch
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.memory import garbage_collection_cuda
-import tqdm
 from YOLOv3_model import YOLOv3
 from dataset import YOLODataset
 from loss import YoloLoss
@@ -9,92 +8,46 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 import config
-from utils import(
-    mean_average_precision,
-    cells_to_bboxes,
-    get_evaluation_bboxes,
-    save_checkpoint,
-    load_checkpoint,
-    check_class_accuracy,
-    get_loaders,
-    plot_couple_examples,
-    ResizeDataLoader,
-    non_max_suppression
-)
-import warnings
-warnings.filterwarnings("ignore")
+from utils import ResizeDataLoader, cells_to_bboxes, non_max_suppression
+
 
 class Model(LightningModule):
     def __init__(self, in_channels=3, num_classes=config.NUM_CLASSES, batch_size=config.BATCH_SIZE,
-                 learning_rate=config.LEARNING_RATE, enable_gc='batch', num_epochs=config.NUM_EPOCHS):
+                 learning_rate=config.LEARNING_RATE, num_epochs=config.NUM_EPOCHS):
         super(Model, self).__init__()
         self.network = YOLOv3(in_channels, num_classes)
         self.criterion = YoloLoss()
         self.batch_size = batch_size
         self.learning_rate = learning_rate
-        self.enable_gc = enable_gc
         self.num_epochs = num_epochs
-        self.train_step_output = []
-        self.test_step_outputs = []
-
-
-        self.scaled_anchors = config.SCALED_ANCHORS
-        # self.register_buffer("scaled_anchors", config.SCALED_ANCHORS)
+        self.register_buffer("scaled_anchors", config.SCALED_ANCHORS)
 
     def forward(self, x):
         return self.network(x)
 
     def common_step(self, batch):
         x, y = batch
-        y0, y1, y2 = (
-            y[0],
-            y[1],
-            y[2],
-        )
-        out = self(x)
-        loss = (
-                self.criterion(out[0], y0, self.scaled_anchors[0])
-                + self.criterion(out[1], y1, self.scaled_anchors[1])
-                + self.criterion(out[2], y2, self.scaled_anchors[2])
-        )
+        out = self.forward(x)
+        loss = self.criterion(out, y, self.scaled_anchors)
+        del out, x, y
         return loss
 
     def training_step(self, batch, batch_idx):
         loss = self.common_step(batch)
-        self.log(f"Training_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        self.train_step_output.append(loss)
+        self.log(f"train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.common_step(batch)
-        self.log(f"Validation_loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        self.test_step_outputs.append(loss)
+        self.log(f"val_loss", loss, on_epoch=True, prog_bar=True, logger=True)
         return loss
-    
-    def on_train_epoch_end(self):
-        print("----------------------------------")
-        print(f"\n Epoch : {self.current_epoch}")
-        print("----------------------------------")
-        train_epoch_avg = torch.stack(self.train_step_output).mean()
-        self.train_step_output.clear()
-        print(f"Training_Loss {train_epoch_avg}")
-        class_accuracy, no_obj_accuracy, obj_accuracy = check_class_accuracy(self.model, self.train_loader, threshold=config.CONF_THRESHOLD)
-        self.log("train/class_accuracy", class_accuracy, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train/no_obj_accuracy", no_obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train/obj_accuracy", obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
 
-        val_epoch_average = torch.stack(self.validation_step_outputs).mean()
-        self.validation_step_outputs.clear()
-        print(f"Validation loss {val_epoch_average}")
-        print("On Validation loader:")
-        class_accuracy, no_obj_accuracy, obj_accuracy = check_class_accuracy(self.model, self.train_eval_loader, threshold=config.CONF_THRESHOLD)
-        self.log("val/class_accuracy", class_accuracy, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val/no_obj_accuracy", no_obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val/obj_accuracy", obj_accuracy, on_epoch=True, prog_bar=True, logger=True)
-
-        if (self.current_epoch>0) and ((self.current_epoch+1) % 10 == 0):
-            plot_couple_examples(self.model, self.test_loader, 0.6, 0.5, self.scaled_anchors)
-        
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        if isinstance(batch, (tuple, list)):
+            x, _ = batch
+        else:
+            x = batch
+        return self.forward(x)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.learning_rate/100, weight_decay=config.WEIGHT_DECAY)
@@ -116,6 +69,54 @@ class Model(LightningModule):
                 "interval": "step",
             }
         }
+    
+     # def training_step(self, batch, batch_idx):
+    #     x, y = batch
+    #     out = self.forward(x)
+    #     loss = self.criterion(out, y, self.scaled_anchors)
+    #     self.log(f"Train_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #     return loss
+
+    # def validation_step(self, batch, batch_idx):
+    #     x, y = batch
+    #     out = self.forward(x)
+    #     loss = self.criterion(out, y, self.scaled_anchors)
+    #     self.log(f"Validation_loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #     return loss
+
+    def on_epoch_end(self):
+        self.model.eval()
+        loader = self.train_dataloader()
+        thresh = 0.6
+        iou_thresh = 0.5
+
+        x, y = next(iter(loader))
+        x = x.to(self.device)
+
+        with torch.no_grad():
+            out = self.model(x)
+            bboxes = [[] for _ in range(x.shape[0])]
+            for i in range(3):
+                batch_size, A, S, _, _ = out[i].shape
+                anchor = self.anchors[i]
+                boxes_scale_i = cells_to_bboxes(
+                    out[i], anchor, S=S, is_preds=True
+                )
+                for idx, (box) in enumerate(boxes_scale_i):
+                    bboxes[idx] += box
+
+        self.model.train()
+
+        for i in range(batch_size // 4):
+            nms_boxes = non_max_suppression(
+                bboxes[i],
+                iou_threshold=iou_thresh,
+                threshold=thresh,
+                box_format="midpoint",
+            )
+            self.plot_image(x[i].permute(1, 2, 0).detach().cpu(), nms_boxes)
+
+            
 
     def train_dataloader(self):
         train_dataset = YOLODataset(
@@ -158,74 +159,6 @@ class Model(LightningModule):
         )
 
         return train_eval_loader
-    
-    
-    # def on_train_epoch_end(self, outputs):
-    #     self.model.eval()
-    #     tot_class_preds, correct_class = 0, 0
-    #     tot_noobj, correct_noobj = 0, 0
-    #     tot_obj, correct_obj = 0, 0
-
-    #     with torch.no_grad():
-    #         for batch_idx, (x, y) in enumerate(tqdm(self.train_dataloader())):  # Use your dataloader here
-    #             x = x.to(self.device)
-    #             out = self.model(x)
-
-    #             for i in range(3):  # Assuming you have 3 outputs as in the original code
-    #                 y[i] = y[i].to(self.device)
-    #                 obj = y[i][..., 0] == 1
-    #                 noobj = y[i][..., 0] == 0
-
-    #                 correct_class += torch.sum(
-    #                     torch.argmax(out[i][..., 5:][obj], dim=-1) == y[i][..., 5][obj]
-    #                 )
-    #                 tot_class_preds += torch.sum(obj)
-
-    #                 obj_preds = torch.sigmoid(out[i][..., 0]) > self.threshold
-    #                 correct_obj += torch.sum(obj_preds[obj] == y[i][..., 0][obj])
-    #                 tot_obj += torch.sum(obj)
-    #                 correct_noobj += torch.sum(obj_preds[noobj] == y[i][..., 0][noobj])
-    #                 tot_noobj += torch.sum(noobj)
-
-    #     class_accuracy = (correct_class / (tot_class_preds + 1e-16)) * 100
-    #     noobj_accuracy = (correct_noobj / (tot_noobj + 1e-16)) * 100
-    #     obj_accuracy = (correct_obj / (tot_obj + 1e-16)) * 100
-
-    #     metrics = {
-    #         "class_accuracy": class_accuracy.item(),
-    #         "noobj_accuracy": noobj_accuracy.item(),
-    #         "obj_accuracy": obj_accuracy.item(),
-    #     }
-
-    #     self.model.train()
-    #     return metrics
-
-
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        if isinstance(batch, (tuple, list)):
-            x, _ = batch
-        else:
-            x = batch
-        return self.forward(x)
-    
-    def predict_dataloader(self):
-        return self.val_dataloader()
-
-    def on_train_batch_end(self, outputs, batch, batch_idx):
-        if self.enable_gc == 'batch':
-            garbage_collection_cuda()
-
-    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        if self.enable_gc == 'batch':
-            garbage_collection_cuda()
-
-    def on_predict_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        if self.enable_gc == 'batch':
-            garbage_collection_cuda()
-
-    def on_train_epoch_end(self):
-        if self.enable_gc == 'epoch':
-            garbage_collection_cuda()
 
 
 def main():
@@ -245,3 +178,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+
+
+
+   
